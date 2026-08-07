@@ -285,7 +285,7 @@ class Soundscape {
   private raf = 0;
   private fade = 0;
   private pauseTimer = 0;
-  private readonly targetVolume = 0.34;
+  private readonly targetVolume = 0.64;
 
   constructor(private readonly audio: HTMLAudioElement, private readonly button: HTMLButtonElement) {
     this.audio.volume = 0;
