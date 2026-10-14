@@ -1,467 +1,515 @@
-import * as THREE from 'three';
+import gsap from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import Lenis from 'lenis';
+import './fonts.css';
 import './style.css';
+import { createScore } from './audio';
+import { Field, scatter, type RGB, type Shape } from './gl/field';
+import { webb, voyager, chip, text, huddle } from './gl/shapes';
+import { beats, contact, marvels, principles, projects, type Beat, type Marvel } from './content';
+import { voyagerKm, lightSeconds, fmtKm, fmtDuration } from './space';
+import { createReticle } from './ui/reticle';
+import { createOrbit } from './ui/orbit';
+import { createPaleBlue } from './ui/paleblue';
+import { createReel } from './ui/reel';
+import { createAutopilot, type Cue, type PilotState } from './ui/autopilot';
 
-type Project = { number: string; title: string; discipline: string; year: string; copy: string; href: string };
+gsap.registerPlugin(ScrollTrigger);
 
-const projects: Project[] = [
-  { number: '01', title: 'A new system for attention', discipline: 'Digital product / identity', year: '2026', copy: 'Replace this with a short, direct project description.', href: '#' },
-  { number: '02', title: 'Objects in motion', discipline: 'Experience / experiment', year: '2025', copy: 'A place for a project that rewards interaction without demanding it.', href: '#' },
-  { number: '03', title: 'Useful, quietly unusual', discipline: 'Strategy / design / build', year: '2025', copy: 'Keep the copy factual. A few good sentences are more memorable than a case-study wall.', href: '#' },
-];
+const $ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => {
+  const el = root.querySelector<T>(s);
+  if (!el) throw new Error(`Missing element: ${s}`);
+  return el;
+};
+const $$ = <T extends Element = HTMLElement>(s: string, root: ParentNode = document) => [...root.querySelectorAll<T>(s)];
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const store = { // per-visitor conveniences only; storage can throw in private modes
+  get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
+};
 
-const app = document.querySelector<HTMLDivElement>('#app');
-if (!app) throw new Error('Missing app root');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const canHover = matchMedia('(hover: hover) and (pointer: fine)').matches;
+const mobile = innerWidth < 860;
+const GOLD: RGB = [1, .72, .3], BONE: RGB = [.93, .91, .86], ASH: RGB = [.5, .5, .55];
+const T0 = performance.now();
 
-app.innerHTML = `
-  <div class="site-grain" aria-hidden="true"></div>
-  <header class="site-header" id="top">
-    <a class="brand" href="#top" aria-label="Ayush Srivastav, top">AYUSH<br>SRIVASTAV<span class="brand-dot">.</span></a>
-    <nav aria-label="Primary navigation">
-      <a href="#work">Work</a><a href="#about">About</a><a href="#experiments">Experiments</a><a href="#contact">Contact</a>
-    </nav>
-    <button class="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false"><span></span><span></span></button>
-  </header>
+// ---------- content → DOM ----------
+$('#filesTrack').innerHTML = projects.map((p, i) => `
+  <article class="file" data-lock="${esc(p.name)}" style="--i:${i}">
+    <header class="mono"><span>${String(i + 1).padStart(2, '0')} / ${String(projects.length).padStart(2, '0')}</span><span class="file__status file__status--${p.orbit}">${esc(p.status)}</span></header>
+    <h3 class="file__name">${esc(p.name)}</h3>
+    <p class="file__line">${esc(p.line)}</p>
+    <p class="file__body">${esc(p.body)}</p>
+    <span class="file__ghost" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span>
+  </article>`).join('');
+$('#howList').innerHTML = principles.map((p, i) => `
+  <li class="how__item" data-n="${String(i + 1).padStart(2, '0')}"><h3>${esc(p.title)}</h3><p>${esc(p.body)}</p></li>`).join('');
+$('#marquee').innerHTML = Array(4).fill(projects.map((p) => `<span>${esc(p.name)}</span><i>✦</i>`).join('')).join('');
+const mail = $<HTMLAnchorElement>('#mail');
+mail.href = `mailto:${contact.email}`; mail.textContent = contact.email;
+$<HTMLAnchorElement>('#gh').href = contact.github;
 
-  <main id="main">
-    <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-canvas" aria-hidden="true"><canvas id="particle-canvas"></canvas></div>
-      <div class="hero-copy">
-        <p class="eyebrow">Independent digital practice <span>•</span> 2026</p>
-        <h1 id="hero-title">Making digital<br><em>things</em> with intent.</h1>
-        <p class="hero-intro">Design, technology and small obsessions—assembled into experiences people can feel.</p>
-      </div>
-      <div class="sound-dock">
-        <button class="sound-toggle" type="button" aria-pressed="false" aria-label="Play Prelude">
-          <span class="sound-orbit" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-          <span class="sound-copy"><span id="sound-state">Sound off</span><strong>Prelude</strong></span>
-          <span class="sound-action" id="sound-action">Play</span>
-        </button>
-      </div>
-      <div class="hero-meta"><span>Scroll to enter</span><span class="scroll-line" aria-hidden="true"></span><span>01—04</span></div>
-      <button class="sphere-note" type="button" aria-label="Focus the particle system" aria-pressed="false">Touch the field <span>↗</span></button>
-    </section>
+const sec = (id: string) => $(`[data-cue="${id}"]`);
 
-    <section class="statement reveal-section" aria-label="Introductory statement">
-      <p class="statement-kicker">A little less noise.</p>
-      <h2>Things worth <em>stopping</em> for usually have a pulse.</h2>
-      <p class="statement-copy">I build identities, interfaces and interactive systems with enough character to be remembered—and enough discipline to be used.</p>
-    </section>
+// ---------- particle field (fails soft: the page works without WebGL) ----------
+let field: Field | null = null;
+try { field = new Field($<HTMLCanvasElement>('#gl'), mobile ? 26000 : 72000); }
+catch (e) { console.warn('WebGL unavailable, continuing without particles', e); document.body.classList.add('no-gl'); }
 
-    <section class="work reveal-section" id="work" aria-labelledby="work-title">
-      <div class="section-heading"><span class="section-index">01</span><h2 id="work-title">Selected work</h2><span class="section-caption">A small edit of ongoing practice</span></div>
-      <div class="project-list">
-        ${projects.map((project) => `<a class="project-row" href="${project.href}" aria-label="${project.title}, placeholder project">
-          <span class="project-number">${project.number}</span>
-          <span class="project-title">${project.title}</span>
-          <span class="project-discipline">${project.discipline}</span>
-          <span class="project-year">${project.year}</span>
-          <span class="project-arrow">↗</span>
-          <span class="project-preview">${project.copy}</span>
-        </a>`).join('')}
-      </div>
-    </section>
+// ---------- scroll ----------
+const lenis = new Lenis({ lerp: .12, wheelMultiplier: 1 });
+lenis.stop();
+lenis.on('scroll', ScrollTrigger.update);
+const topOf = (el: HTMLElement) => el.getBoundingClientRect().top + scrollY;
+const scrollTo = (y: number) => lenis.scrollTo(y, { immediate: true, force: true });
 
-    <section class="about reveal-section" id="about" aria-labelledby="about-title">
-      <div class="section-heading"><span class="section-index">02</span><h2 id="about-title">About the practice</h2></div>
-      <div class="about-grid">
-        <p class="about-big">The point is not to make a website look expensive. The point is to make a person <em>feel something useful.</em></p>
-        <div class="about-small"><p>Placeholder copy: explain your approach in a few plainspoken sentences. Mention the kind of problems you like, the people you work with, and the standard you hold yourself to.</p><a class="text-link" href="#contact">Start a conversation <span>→</span></a></div>
-      </div>
-    </section>
+// ---------- UI systems ----------
+const reticle = createReticle($('#reticle'), $('#reticleLabel'), canHover);
+if (canHover) document.body.classList.add('has-reticle');
+const orbit = createOrbit($<SVGSVGElement>('#orbitSvg'), $('#orbitCard'), $('#orbitLegend'), projects);
 
-    <section class="experiments reveal-section" id="experiments" aria-labelledby="experiments-title">
-      <div class="section-heading"><span class="section-index">03</span><h2 id="experiments-title">On the side</h2><span class="section-caption">Experiments, fragments, unfinished ideas</span></div>
-      <div class="experiment-grid">
-        <button class="experiment-card card-a" type="button" data-message="Signal detected: the field is listening."><span>01 / FIELD STUDY</span><strong>Press<br>gently</strong><i></i></button>
-        <button class="experiment-card card-b" type="button" data-message="Nothing is static. It only looks that way from far enough away."><span>02 / MOTION NOTE</span><strong>Hold the<br>line</strong><i></i></button>
-        <button class="experiment-card card-c" type="button" data-message=" ̑ "><span>03 / SMALL DETAIL</span><strong>Stay<br>curious</strong><i></i></button>
-      </div>
-      <p class="experiment-message" aria-live="polite">Choose a fragment.</p>
-    </section>
+// ---------- frame loop ----------
+let marqueeHalf = 0, marqueeOn = false, lvl = -1;
+let last = 0, lastY = scrollY, vel = 0, frames = 0, fpsT = 0, fps = 60, slowFor = 0, kmT = 0, marqueeX = 0;
+const stay = $('#stay'), marquee = $('#marquee'), clock = $('#clock'), kmEl = $('#km'), hudKm = $('#hudKm'), lightEl = $('#lightTime');
+gsap.ticker.add((t) => {
+  lenis.raf(t * 1000);
+  const dt = Math.min(.05, Math.max(1 / 240, t - last)); last = t;
+  vel += (gsap.utils.clamp(-1.5, 1.5, (scrollY - lastY) / dt / 4000) - vel) * .12; lastY = scrollY;
 
-    <section class="contact reveal-section" id="contact" aria-labelledby="contact-title">
-      <div><span class="section-index">04</span><p class="eyebrow">Available for select work</p></div>
-      <h2 id="contact-title">Have an idea<br>with some <em>gravity?</em></h2>
-      <a class="contact-link" href="mailto:hello@ayushsrivastav.com">hello@ayushsrivastav.com <span>↗</span></a>
-    </section>
-  </main>
-
-  <footer>
-    <div class="footer-field" aria-hidden="true" id="footer-field"></div>
-    <span>AYUSH SRIVASTAV © 2026</span><span>Built with attention</span><a href="#top">Back to top ↑</a>
-  </footer>
-  <audio id="prelude" src="/audio/prelude.mp3" preload="metadata" loop></audio>
-  <aside class="instrument" aria-live="polite" aria-label="Particle system diagnostics" hidden>
-    <p>INSTRUMENT / ACTIVE</p><dl><div><dt>backend</dt><dd id="diag-backend">WEBGL</dd></div><div><dt>particles</dt><dd id="diag-particles">0</dd></div><div><dt>frame</dt><dd id="diag-frame">0 ms</dd></div><div><dt>quality</dt><dd id="diag-quality">balanced</dd></div></dl><span>SHIFT + A / ESC TO CLOSE</span>
-  </aside>
-`;
-
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const canvas = document.querySelector<HTMLCanvasElement>('#particle-canvas');
-const hero = document.querySelector<HTMLElement>('.hero');
-const note = document.querySelector<HTMLButtonElement>('.sphere-note');
-if (!canvas || !hero || !note) throw new Error('Missing hero scene elements');
-const sceneCanvas: HTMLCanvasElement = canvas;
-const heroSection: HTMLElement = hero;
-
-class ParticleField {
-  private renderer: THREE.WebGLRenderer;
-  private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-  private points: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
-  private clock = new THREE.Clock();
-  private pointer = new THREE.Vector2(9, 9);
-  private pointerTarget = new THREE.Vector2(9, 9);
-  private pointerVelocity = new THREE.Vector2();
-  private frameMs = 16;
-  private lastTime = performance.now();
-  private quality: 'high' | 'balanced' | 'low' = 'high';
-  private raf = 0;
-  private isVisible = true;
-  private focus = 0;
-  private focusTimer = 0;
-  private activeCount = 0;
-  private stableFrames = 0;
-  private readonly events = new AbortController();
-  readonly count: number;
-
-  constructor() {
-    const mobile = matchMedia('(max-width: 700px)').matches;
-    this.count = mobile ? 5200 : 9800;
-    this.activeCount = this.count;
-    this.renderer = new THREE.WebGLRenderer({ canvas: sceneCanvas, alpha: true, antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setClearColor(0x000000, 0);
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.5 : 2));
-    this.camera.position.z = 6.1;
-    this.points = this.createPoints(this.count);
-    this.points.position.set(mobile ? 0.16 : 0.78, mobile ? 0.22 : 0.16, 0);
-    this.scene.add(this.points);
-    this.resize();
-    this.bind();
-    this.animate();
+  reel?.frame(t, dt);
+  if (field) {
+    const fade = introDone ? gsap.utils.clamp(0, 1, 1 - scrollY / (innerHeight * .95)) : 1;
+    field.u.uFade.value = fade; field.u.uVel.value = vel;
+    field.tick(t, dt, fade > .002);
   }
+  score.frame();
+  const level = score.level, onset = score.onset;
+  if (field) { field.u.uAudio.value = level; field.u.uOnset.value = onset; }
+  reticle.frame(level); orbit.frame(dt); pilot.frame(); pale.setGlow(level);
+  if (Math.abs(level - lvl) > .015) { lvl = level; document.documentElement.style.setProperty('--lvl', level.toFixed(3)); }
 
-  private createPoints(count: number) {
-    const positions = new Float32Array(count * 3);
-    const seeds = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      const u = (i + 0.5) / count;
-      const phi = Math.acos(1 - 2 * u);
-      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-      const random = (Math.sin(i * 12.9898 + 78.233) * 43758.5453) % 1;
-      const normalized = random < 0 ? random + 1 : random;
-      const radial = i % 4 === 0
-        ? 0.38 + Math.pow(normalized, 0.72) * 1.52
-        : 1.48 + (normalized - 0.5) * 0.22;
-      positions[i * 3] = radial * Math.sin(phi) * Math.cos(theta);
-      positions[i * 3 + 1] = radial * Math.cos(phi);
-      positions[i * 3 + 2] = radial * Math.sin(phi) * Math.sin(theta);
-      seeds[i] = normalized;
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 1));
-    const material = new THREE.ShaderMaterial({
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-      uniforms: { uTime: { value: 0 }, uPointer: { value: this.pointer }, uVelocity: { value: this.pointerVelocity }, uScroll: { value: 0 }, uFocus: { value: 0 }, uAudio: { value: 0 }, uPixelRatio: { value: this.renderer.getPixelRatio() } },
-      vertexShader: `
-        uniform float uTime; uniform vec2 uPointer; uniform vec2 uVelocity; uniform float uScroll; uniform float uFocus; uniform float uAudio; uniform float uPixelRatio; attribute float aSeed; varying float vAlpha; varying float vSeed;
-        float hash(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
-        void main(){
-          vec3 p = position; float t = uTime * 0.32 + aSeed * 12.0;
-          vec3 wave = vec3(sin(p.y*1.7+t), cos(p.z*1.5-t*1.13), sin(p.x*1.9+t*0.72));
-          p += wave * (0.12 + aSeed * 0.17);
-          float breath = 1.0 + sin(uTime*0.55 + aSeed*8.0) * 0.035;
-          breath += sin(uTime * 1.7 + aSeed * 21.0) * uAudio * 0.075;
-          p *= breath;
-          vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          vec2 local = mv.xy / max(0.1, -mv.z);
-          float d = length(local - uPointer * 1.2);
-          float pull = exp(-d*d*2.4) * (0.16 + uFocus*0.26);
-          p += normalize(p + 0.0001) * pull;
-          float impulse = exp(-d*d*3.5) * clamp(length(uVelocity) * 0.36, 0.0, 0.12);
-          p.xy += uVelocity * impulse;
-          p.x += sin(uScroll*0.002 + p.y) * 0.05;
-          mv = modelViewMatrix * vec4(p, 1.0);
-          gl_Position = projectionMatrix * mv;
-          gl_PointSize = (3.0 + aSeed * 5.2 + uFocus * 1.8 + uAudio * 1.8) * uPixelRatio * (4.8 / -mv.z);
-          vAlpha = (0.48 + aSeed * 0.42 + uAudio * 0.16) * smoothstep(0.0, 0.85, 1.0 - abs(mv.z + 4.0) * 0.12); vSeed = aSeed;
-        }`,
-      fragmentShader: `
-        varying float vAlpha; varying float vSeed;
-        void main(){ float d = distance(gl_PointCoord, vec2(0.5)); float soft = 1.0 - smoothstep(0.12, 0.5, d); vec3 c = mix(vec3(0.70,0.77,0.78), vec3(1.0,0.48,0.17), smoothstep(0.76,1.0,vSeed)*0.45); gl_FragColor = vec4(c, soft*vAlpha); }
-      `
-    });
-    return new THREE.Points(geometry, material);
-  }
+  marqueeX -= (40 + Math.abs(vel) * 900) * dt * (vel < -.02 ? -1 : 1);
+  const half = marqueeHalf;
+  if (half && marqueeOn) { marqueeX = ((marqueeX % half) - half) % half; marquee.style.transform = `translate3d(${marqueeX}px,0,0) skewX(${gsap.utils.clamp(-12, 12, -vel * 18)}deg)`; }
 
-  private bind() {
-    const options = { passive: true, signal: this.events.signal };
-    addEventListener('resize', this.resize, options);
-    heroSection.addEventListener('pointermove', (event) => {
-      const rect = heroSection.getBoundingClientRect();
-      const nextX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      const nextY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      this.pointerVelocity.set(nextX - this.pointerTarget.x, nextY - this.pointerTarget.y);
-      this.pointerTarget.set(nextX, nextY);
-    }, options);
-    heroSection.addEventListener('pointerleave', () => this.pointerTarget.set(9, 9), options);
-    heroSection.addEventListener('pointerdown', () => this.setFocus(), options);
-    addEventListener('scroll', () => {
-      this.points.material.uniforms.uScroll.value = scrollY;
-      const progress = Math.min(scrollY / Math.max(1, document.body.scrollHeight - innerHeight), 1);
-      document.documentElement.style.setProperty('--scroll-shift', `${progress * -12}px`);
-    }, options);
-    document.addEventListener('visibilitychange', () => { this.isVisible = !document.hidden; if (this.isVisible && !this.raf) this.animate(); }, options);
-    reduceMotion.addEventListener('change', () => { if (reduceMotion.matches) this.points.material.uniforms.uFocus.value = 0; }, options);
-    sceneCanvas.addEventListener('webglcontextlost', (event) => { event.preventDefault(); document.body.classList.add('no-webgl'); }, options);
+  if (t - kmT > .1) { // ~10 Hz is plenty for a ticking counter
+    kmT = t;
+    const km = voyagerKm(), s = fmtKm(km);
+    kmEl.textContent = s; hudKm.textContent = s; lightEl.textContent = fmtDuration(lightSeconds(km));
+    const e = Math.floor((performance.now() - T0) / 1000);
+    const mins = Math.floor(e / 60), secs = e % 60;
+    stay.textContent = `You have been here ${mins ? `${mins} min ` : ''}${secs} s. In that time Voyager 1 moved ${fmtKm(e * 17)} km further from home.`;
+    clock.textContent = `T+${[e / 3600, (e / 60) % 60, e % 60].map((v) => String(Math.floor(v)).padStart(2, '0')).join(':')}`;
   }
+  frames++;
+  if (t - fpsT > 1) { // adaptive quality: sustained low FPS halves the dots once
+    fps = frames; frames = 0; fpsT = t;
+    slowFor = fps < 38 ? slowFor + 1 : 0;
+    if (field && slowFor >= 2 && field.budget === field.n) field.setBudget(.5);
+    if (instrumentOn) updateInstrument();
+  }
+});
+gsap.ticker.lagSmoothing(0);
 
-  setFocus() {
-    this.focus = 1;
-    window.clearTimeout(this.focusTimer);
-    this.focusTimer = window.setTimeout(() => { this.focus = 0; }, 1600);
-  }
-  setAudioEnergy(energy: number) {
-    const current = this.points.material.uniforms.uAudio.value as number;
-    const target = reduceMotion.matches ? 0 : Math.min(0.72, Math.max(0, energy));
-    this.points.material.uniforms.uAudio.value = current + (target - current) * 0.13;
-  }
-  private setQuality(next: 'high' | 'balanced' | 'low') {
-    if (next === this.quality) return;
-    this.quality = next;
-    const multiplier = next === 'high' ? 1 : next === 'balanced' ? 0.72 : 0.46;
-    this.activeCount = Math.floor(this.count * multiplier);
-    this.points.geometry.setDrawRange(0, this.activeCount);
-    const pixelRatio = next === 'high' ? Math.min(devicePixelRatio, 2) : next === 'balanced' ? Math.min(devicePixelRatio, 1.35) : 1;
-    this.renderer.setPixelRatio(pixelRatio);
-    this.resize();
-  }
-  private resize = () => { const rect = heroSection.getBoundingClientRect(); this.camera.aspect = rect.width / rect.height; this.camera.updateProjectionMatrix(); this.renderer.setSize(rect.width, rect.height, false); this.points.material.uniforms.uPixelRatio.value = this.renderer.getPixelRatio(); };
-  private animate = () => {
-    if (!this.isVisible) { this.raf = 0; return; }
-    this.raf = requestAnimationFrame(this.animate);
-    const now = performance.now(); this.frameMs = this.frameMs * 0.92 + (now - this.lastTime) * 0.08; this.lastTime = now;
-    if (!reduceMotion.matches) {
-      this.pointer.lerp(this.pointerTarget, 0.07);
-      this.pointerVelocity.multiplyScalar(0.89);
-      this.points.material.uniforms.uTime.value = this.clock.getElapsedTime();
-      this.points.material.uniforms.uFocus.value += (this.focus - this.points.material.uniforms.uFocus.value) * 0.06;
-      this.points.rotation.y += 0.00135; this.points.rotation.x = Math.sin(this.clock.getElapsedTime() * 0.18) * 0.08;
-    }
-    if (this.frameMs > 25 && this.quality === 'high') this.setQuality('balanced');
-    if (this.frameMs > 38 && this.quality === 'balanced') this.setQuality('low');
-    if (this.frameMs < 17) this.stableFrames += 1; else this.stableFrames = 0;
-    if (this.stableFrames > 540 && this.quality === 'low') { this.setQuality('balanced'); this.stableFrames = 0; }
-    if (this.stableFrames > 900 && this.quality === 'balanced') { this.setQuality('high'); this.stableFrames = 0; }
-    this.renderer.render(this.scene, this.camera);
-  };
-  diagnostics() { return { backend: this.renderer.capabilities.isWebGL2 ? 'WEBGL2' : 'WEBGL', frame: this.frameMs, quality: this.quality, calls: this.renderer.info.render.calls, particles: this.activeCount }; }
-  dispose() {
-    cancelAnimationFrame(this.raf);
-    window.clearTimeout(this.focusTimer);
-    this.events.abort();
-    this.points.geometry.dispose();
-    this.points.material.dispose();
-    this.renderer.dispose();
+// ---------- intro: the dots decide what to become ----------
+const FONTS = ['600 80px "Clash Display"', 'italic 300 80px "Newsreader"'];
+const fontsReady = Promise.race([Promise.all(FONTS.map((f) => document.fonts.load(f))), sleep(3000)]);
+const BEAT_MS: Record<Beat, number> = { huddle: 1500, webb: 3100, voyager: 3100, chip: 2800, people: 2500, name: 2700 };
+let introDone = false, introEndedAt = 0, beatName: Beat | '—' = '—';
+const caption = $('#caption'), beatNo = $('#beatNo');
+
+function shapeFor(b: Beat): Shape | null {
+  if (!field) return null;
+  const n = field.n, v = field.view();
+  switch (b) {
+    case 'huddle': return huddle(n, v);
+    case 'webb': return webb(n, v);
+    case 'voyager': return voyager(n, v);
+    case 'chip': return chip(n, v);
+    case 'people': return text(n, v, mobile ? ['all made', 'by people.'] : ['all made by people.'], (p) => `italic 300 ${p}px "Newsreader"`, BONE, GOLD, .8, 22, .78);
+    case 'name': return text(n, v, mobile ? ['Ayush', 'Srivastav'] : ['Ayush Srivastav'], (p) => `600 ${p}px "Clash Display"`, GOLD, BONE, .84, 23, .86);
   }
 }
 
-let field: ParticleField | null = null;
-try { field = new ParticleField(); } catch { document.body.classList.add('no-webgl'); }
-
-const audioElement = document.querySelector<HTMLAudioElement>('#prelude');
-const soundToggle = document.querySelector<HTMLButtonElement>('.sound-toggle');
-const soundState = document.querySelector<HTMLElement>('#sound-state');
-const soundAction = document.querySelector<HTMLElement>('#sound-action');
-
-class Soundscape {
-
-  
-  private context: AudioContext | null = null;
-  private analyser: AnalyserNode | null = null;
-  private source: MediaElementAudioSourceNode | null = null;
-  private values = new Uint8Array(64);
-  private raf = 0;
-  private fade = 0;
-  private pauseTimer = 0;
-  private readonly targetVolume = 0.64;
-
-  constructor(private readonly audio: HTMLAudioElement, private readonly button: HTMLButtonElement) {
-    this.audio.volume = 0;
-    this.audio.addEventListener('pause', this.renderState);
-    this.audio.addEventListener('play', this.renderState);
-    this.audio.addEventListener('ended', this.renderState);
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden && !this.audio.paused) this.pause();
-    });
-    this.renderState();
-  }
-
-  private ensureGraph() {
-    if (!this.context) {
-      this.context = new AudioContext();
-    }
-  
-    if (this.source) return;
-  
-    this.analyser = this.context.createAnalyser();
-    this.analyser.fftSize = 128;
-    this.analyser.smoothingTimeConstant = 0.82;
-  
-    this.source = this.context.createMediaElementSource(this.audio);
-  
-    this.source.connect(this.analyser);
-    this.analyser.connect(this.context.destination);
-  }
-
-  private renderState = () => {
-    const playing = !this.audio.paused;
-    this.button.classList.toggle('is-playing', playing);
-    this.button.setAttribute('aria-pressed', String(playing));
-    this.button.setAttribute('aria-label', playing ? 'Pause Prelude' : 'Play Prelude');
-    if (soundState) soundState.textContent = playing ? 'Sound on' : 'Sound off';
-    if (soundAction) soundAction.textContent = playing ? 'Pause' : 'Play';
-    if (!playing) field?.setAudioEnergy(0);
-  };
-
-  private fadeTo(target: number) {
-    window.clearInterval(this.fade);
-    this.fade = window.setInterval(() => {
-      const direction = target > this.audio.volume ? 1 : -1;
-      const next = this.audio.volume + direction * 0.018;
-      if ((direction > 0 && next >= target) || (direction < 0 && next <= target)) {
-        this.audio.volume = target;
-        window.clearInterval(this.fade);
-        return;
-      }
-      this.audio.volume = next;
-    }, 28);
-  }
-
-  private tick = () => {
-    if (this.audio.paused || !this.analyser) {
-      this.raf = 0;
-      field?.setAudioEnergy(0);
-      return;
-    }
-    this.analyser.getByteFrequencyData(this.values);
-    let total = 0;
-    for (let i = 1; i < 22; i += 1) total += this.values[i];
-    const energy = Math.pow(total / (21 * 255), 1.25);
-    field?.setAudioEnergy(energy);
-    this.button.style.setProperty('--sound-energy', energy.toFixed(3));
-    this.button.style.setProperty('--sound-glow', `${5 + energy * 18}px`);
-    this.button.style.setProperty('--sound-scale', `${1 + energy * 0.18}`);
-    this.raf = requestAnimationFrame(this.tick);
-  };
-
-  private async startPlayback() {
-    this.audio.volume = 0;
-  
-    await this.audio.play();
-  
-    if (!this.context) {
-      this.ensureGraph();
-    }
-  
-    if (this.context?.state === "suspended") {
-      await this.context.resume();
-    }
-  
-    this.fadeTo(this.targetVolume);
-  
-    if (!this.raf) {
-      this.tick();
-    }
-  }
-
-  async toggle() {
-  window.clearTimeout(this.pauseTimer);
-
-  if (!this.audio.paused) {
-    this.pause();
+async function intro() {
+  if (!field || reduced) { await fontsReady; return finishIntro(); }
+  const hold = new URLSearchParams(location.search).get('beat') as Beat | null; // dev: ?beat=webb holds one shape
+  if (hold && beats.some((b) => b.shape === hold)) {
+    await fontsReady; const s = shapeFor(hold); if (!s) return;
+    field.morph(s, 2.5); field.spinSpeed = .09; gsap.to(field.u.uDoubt, { value: .3, duration: 2.5 }); beatName = hold;
     return;
   }
-
-  try {
-    await this.startPlayback();
-  } catch {
-    if (soundState) soundState.textContent = 'Sound unavailable';
-    if (soundAction) soundAction.textContent = 'Retry';
+  const list: readonly (typeof beats)[number][] = beats.filter((b) => b.shape !== 'name'); // full intro every visit; ends on "all made by people."
+  for (const [i, b] of list.entries()) {
+    if (introDone) return;
+    if (b.shape === 'people' || b.shape === 'name') await fontsReady;
+    const shape = shapeFor(b.shape);
+    if (!shape || introDone) return;
+    const ms = BEAT_MS[b.shape], isText = b.shape === 'people' || b.shape === 'name';
+    beatName = b.shape;
+    field.morph(shape, (ms / 1000) * .9, isText ? .7 : 1.1);
+    gsap.fromTo(field.u.uDoubt, { value: 1 }, { value: isText ? .1 : .3, duration: ms / 1000, ease: 'power2.out' });
+    if (isText) { field.spinSpeed = 0; gsap.to(field.u.uSpin, { value: Math.round(field.u.uSpin.value / (Math.PI * 2)) * Math.PI * 2, duration: 1.4, ease: 'power3.inOut' }); }
+    else if (b.shape !== 'huddle') field.spinSpeed = .09;
+    beatNo.textContent = `${String(i).padStart(2, '0')} / ${String(list.length - 1).padStart(2, '0')}`;
+    setCaption(b.caption);
+    await sleep(ms);
   }
+  finishIntro();
 }
 
-async autoplay() {
-  if (!this.audio.paused) return;
-
-  await this.startPlayback();
+function setCaption(s: string) {
+  if (!s) { gsap.to(caption, { opacity: 0, duration: .4 }); return; }
+  gsap.set(caption, { opacity: 1 });
+  scramble(caption, s, 1.1);
 }
 
-  pause() {
-    this.fadeTo(0);
-    window.clearTimeout(this.pauseTimer);
-    this.pauseTimer = window.setTimeout(() => this.audio.pause(), 350);
+function finishIntro() {
+  if (introDone) return;
+  introDone = true; introEndedAt = performance.now();
+  document.body.classList.remove('is-loading');
+  lenis.start();
+  if (field) {
+    gsap.killTweensOf(field.u.uDoubt);
+    field.u.uDoubt.value = .15;
+    if (reel && !reduced) reel.start(); // the name breaks apart and becomes the first marvel
+    else { field.spinSpeed = .012; field.morph(scatter(field.n, field.view(), 5, ASH), 2.4, 2.5); }
   }
-
-  dispose() {
-    cancelAnimationFrame(this.raf);
-    window.clearInterval(this.fade);
-    window.clearTimeout(this.pauseTimer);
-    this.audio.pause();
-    void this.context?.close();
-  }
+  heroIn();
+  if (reduced) pilot.toggle(); else pilot.arm();
+  const idle = window.requestIdleCallback ?? ((f: () => void) => setTimeout(f, 1200));
+  idle(() => pale.prepare(), { timeout: 4000 }); // paint the Earth while nothing else is happening
 }
+$('#skip').addEventListener('click', finishIntro);
+addEventListener('keydown', (e) => { if (!introDone && (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ')) finishIntro(); });
+addEventListener('wheel', () => { if (!introDone) finishIntro(); }, { passive: true });
 
-let sound: Soundscape | null = null;
+// ---------- text effects ----------
+const GLYPHS = '·:+×*<>/\\=-01';
+const scrambles = new WeakMap<Element, gsap.core.Tween>();
+function scramble(el: HTMLElement, to: string, dur = .6) {
+  scrambles.get(el)?.kill();
+  const o = { p: 0 };
+  scrambles.set(el, gsap.to(o, {
+    p: 1, duration: dur, ease: 'none',
+    onUpdate: () => { const k = Math.floor(o.p * to.length); el.textContent = to.slice(0, k) + [...to.slice(k, k + 12)].map((c) => (c === ' ' ? ' ' : GLYPHS[(Math.random() * GLYPHS.length) | 0])).join(''); },
+    onComplete: () => { el.textContent = to; },
+  }));
+}
+function splitChars(el: HTMLElement) {
+  const words = (el.textContent ?? '').trim().split(/\s+/);
+  el.innerHTML = words.map((w) => `<span class="w">${[...w].map((c) => `<span class="ch">${esc(c)}</span>`).join('')}</span>`).join(' ');
+}
+function splitWords(el: HTMLElement) {
+  el.innerHTML = el.innerHTML.replace(/(<em>.*?<\/em>|[^\s<]+)/g, '<span class="wd">$1</span>');
+}
+$$('.split').forEach(splitChars);
+$$('.words').forEach(splitWords);
 
-if (audioElement && soundToggle) {
-  sound = new Soundscape(audioElement, soundToggle);
+function heroIn() {
+  gsap.fromTo('.hero__name .ch', { yPercent: 115, rotate: 6, opacity: 0 }, { yPercent: 0, rotate: 0, opacity: 1, duration: 1.05, stagger: .028, ease: 'expo.out', delay: .1 });
+  gsap.fromTo('.marvel > *, .hero__foot > *, .hud, .dock', { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: .9, stagger: .06, delay: .35, ease: 'expo.out' });
+}
+gsap.set('.hud, .dock', { opacity: 0 });
 
-  soundToggle.addEventListener('click', () => void sound?.toggle());
+// headings rise char by char as they arrive
+$$('section:not(.hero) .split').forEach((h) => gsap.fromTo($$('.ch', h), { yPercent: 110 }, { yPercent: 0, stagger: .018, duration: 1, ease: 'expo.out', scrollTrigger: { trigger: h, start: 'top 85%' } }));
+$$('section:not(.hero) .kicker').forEach((k) => ScrollTrigger.create({ trigger: k, start: 'top 90%', once: true, onEnter: () => scramble(k, k.textContent ?? '', .7) }));
+// words light up as you read down
+$$('.words').forEach((w) => gsap.to($$('.wd', w), { opacity: 1, stagger: .1, ease: 'none', scrollTrigger: { trigger: w, start: 'top 78%', end: 'bottom 52%', scrub: true } }));
+gsap.fromTo('.distance__num', { letterSpacing: '.2em', opacity: 0 }, { letterSpacing: '-.04em', opacity: 1, ease: 'expo.out', duration: 1.6, scrollTrigger: { trigger: '.distance__num', start: 'top 85%' } });
 
-  void sound.autoplay().catch(() => {
-    const unlock = async () => {
-      try {
-        console.log("unlock");
-await sound?.toggle();
-    
-        document.removeEventListener('pointerdown', unlock);
-        document.removeEventListener('touchstart', unlock);
-        document.removeEventListener('keydown', unlock);
-        document.removeEventListener('click', unlock);
-      } catch {
-        // Keep waiting for another interaction.
-      }
-    };
-    
-    document.addEventListener('pointerdown', unlock);
-    document.addEventListener('touchstart', unlock);
-    document.addEventListener('keydown', unlock);
-    document.addEventListener('click', unlock);
+// home: the pull-back to a pale blue dot (pinned, scrubbed — created in page order so pin spacing stacks)
+const paleLines = $$('.pale__line');
+const pale = createPaleBlue(sec('pale'), $<HTMLCanvasElement>('#pale'), paleLines, $('#paleHere'));
+
+// project files: a horizontal reel on desktop, a plain stack on small screens
+let filesST: ScrollTrigger | null = null;
+const mm = gsap.matchMedia();
+mm.add('(min-width: 860px)', () => {
+  const track = $('#filesTrack');
+  const tw = gsap.to(track, {
+    x: () => -(track.scrollWidth - innerWidth + 64), ease: 'none',
+    scrollTrigger: { trigger: '.files', pin: '.files__pin', start: 'top top', end: () => `+=${track.scrollWidth - innerWidth + 64}`, scrub: .6, invalidateOnRefresh: true },
   });
+  filesST = tw.scrollTrigger ?? null;
+  return () => { filesST = null; };
+});
+$$<HTMLElement>('.file').forEach((f) => {
+  if (!canHover) return;
+  f.addEventListener('pointermove', (e) => { const r = f.getBoundingClientRect(); f.style.setProperty('--rx', `${((e.clientY - r.top) / r.height - .5) * -8}deg`); f.style.setProperty('--ry', `${((e.clientX - r.left) / r.width - .5) * 10}deg`); });
+  f.addEventListener('pointerleave', () => { f.style.setProperty('--rx', '0deg'); f.style.setProperty('--ry', '0deg'); });
+});
+
+// principles: a sticky index that counts with you
+const howIndex = $('#howIndex');
+$$('.how__item').forEach((li) => ScrollTrigger.create({
+  trigger: li, start: 'top 60%', end: 'bottom 60%',
+  onToggle: (st) => { li.classList.toggle('is-on', st.isActive); if (st.isActive) scramble(howIndex, li.dataset.n ?? '', .4); },
+}));
+ScrollTrigger.create({ start: 0, end: 'max', onUpdate: (st) => gsap.set('#prog', { scaleX: st.progress }) });
+if (field) gsap.to(field.camera.position, { z: 15, ease: 'none', scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true } });
+
+// contact
+$('#copy').addEventListener('click', async () => {
+  const btn = $('#copy');
+  try { await navigator.clipboard.writeText(contact.email); scramble(btn, 'Copied', .4); }
+  catch { scramble(btn, 'Select and copy above', .4); }
+  setTimeout(() => scramble(btn, 'Copy address', .4), 2200);
+});
+if (canHover) { // magnetic email
+  mail.addEventListener('pointermove', (e) => { const r = mail.getBoundingClientRect(); gsap.to(mail, { x: (e.clientX - r.left - r.width / 2) * .12, y: (e.clientY - r.top - r.height / 2) * .25, duration: .5, ease: 'power3.out' }); });
+  mail.addEventListener('pointerleave', () => gsap.to(mail, { x: 0, y: 0, duration: .9, ease: 'elastic.out(1, .4)' }));
 }
 
-note.addEventListener('click', () => {
-  field?.setFocus();
-  note.classList.add('active');
-  note.setAttribute('aria-pressed', 'true');
-  setTimeout(() => { note.classList.remove('active'); note.setAttribute('aria-pressed', 'false'); }, 900);
+// in-page links glide instead of jumping
+$$<HTMLAnchorElement>('a[href^="#"]').forEach((a) => a.addEventListener('click', (e) => {
+  const id = a.getAttribute('href') ?? '#';
+  if (id.length < 2) return;
+  e.preventDefault();
+  lenis.scrollTo(id === '#top' ? 0 : id, { duration: 1.6 });
+}));
+
+addEventListener('pointermove', (e) => field?.setMouse((e.clientX / innerWidth) * 2 - 1, -((e.clientY / innerHeight) * 2 - 1)), { passive: true });
+addEventListener('resize', () => field?.resize());
+
+const measureMarquee = () => { marqueeHalf = marquee.scrollWidth / 2; };
+measureMarquee(); addEventListener('resize', measureMarquee); document.fonts.ready.then(measureMarquee);
+new IntersectionObserver(([e]) => { marqueeOn = e.isIntersecting; }).observe(marquee);
+
+// ---------- the hero reel: marvels in dots, and the playground ----------
+const mvIdx = $('#mvIdx'), mvName = $('#mvName'), mvLine = $('#mvLine'), mvBar = $('#mvBar'), mvDots = $('#mvDots'), hero = $('.hero');
+mvDots.innerHTML = marvels.map((m, k) => `<button type="button" aria-label="${esc(m.name)}" data-k="${k}"></button>`).join('');
+const dotEls = $$<HTMLButtonElement>('button', mvDots);
+function renderMarvel(i: number, m: Marvel, ms: number) {
+  mvIdx.textContent = String(i + 1).padStart(2, '0');
+  scramble(mvName, m.name, .55);
+  gsap.fromTo(mvLine, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: .6, delay: .25, ease: 'expo.out', onStart: () => { mvLine.textContent = m.line; } });
+  dotEls.forEach((d, k) => d.classList.toggle('is-on', k === i));
+  gsap.fromTo(mvBar, { scaleX: 0 }, { scaleX: 1, duration: ms / 1000, ease: 'none', overwrite: true });
+}
+const reel = field ? createReel(field, marvels, {
+  onChange: renderMarvel,
+  gap: () => ({ top: $('#marvel').getBoundingClientRect().bottom + scrollY + 8, bottom: $('.hero__name').getBoundingClientRect().top + scrollY - 8 }),
+}) : null;
+if (!reel) $('#marvel').hidden = true;
+dotEls.forEach((d) => d.addEventListener('click', () => reel?.to(Number(d.dataset.k))));
+$('#mvPrev').addEventListener('click', () => reel?.prev());
+$('#mvNext').addEventListener('click', () => reel?.next());
+let heroVisible = true;
+new IntersectionObserver(([e]) => { heroVisible = e.isIntersecting; reel?.setVisible(e.isIntersecting); }, { threshold: .35 }).observe(hero);
+
+// drag to turn · click to scatter · hold to gather
+let down: { x: number; lx: number; dragged: boolean; held: boolean; timer: number } | null = null;
+const playable = (t: EventTarget | null) => !(t as Element | null)?.closest?.('a, button, input, label');
+hero.addEventListener('pointerdown', (e) => {
+  if (!reel || !introDone || !playable(e.target)) return;
+  field?.setMouse((e.clientX / innerWidth) * 2 - 1, -((e.clientY / innerHeight) * 2 - 1));
+  down = { x: e.clientX, lx: e.clientX, dragged: false, held: false, timer: window.setTimeout(() => { if (down && !down.dragged) { down.held = true; reel.hold(true); } }, 240) };
 });
-addEventListener('pagehide', () => { field?.dispose(); sound?.dispose(); }, { once: true });
+addEventListener('pointermove', (e) => {
+  if (!down || !reel) return;
+  if (!down.dragged && Math.abs(e.clientX - down.x) > 7) { down.dragged = true; clearTimeout(down.timer); if (down.held) { reel.hold(false); down.held = false; } }
+  if (down.dragged) reel.drag(e.clientX - down.lx);
+  down.lx = e.clientX;
+}, { passive: true });
+const release = (e: PointerEvent) => {
+  if (!down || !reel) return;
+  clearTimeout(down.timer);
+  if (down.held) reel.hold(false); else if (!down.dragged && e.type === 'pointerup') reel.burst(e.clientX, e.clientY);
+  down = null;
+};
+addEventListener('pointerup', release); addEventListener('pointercancel', release);
 
-const menuToggle = document.querySelector<HTMLButtonElement>('.menu-toggle');
-const header = document.querySelector<HTMLElement>('.site-header');
-menuToggle?.addEventListener('click', () => { const open = header?.classList.toggle('menu-open') ?? false; menuToggle.setAttribute('aria-expanded', String(open)); menuToggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation'); });
-document.querySelectorAll('nav a').forEach((link) => link.addEventListener('click', () => { header?.classList.remove('menu-open'); menuToggle?.setAttribute('aria-expanded', 'false'); }));
+// ← / → switch marvels; typing in the box makes the dots write
+addEventListener('keydown', (e) => {
+  if (!reel || !introDone || !heroVisible || (e.target as Element | null)?.closest?.('input')) return;
+  if (e.key === 'ArrowRight') reel.next(); else if (e.key === 'ArrowLeft') reel.prev();
+});
+const write = $<HTMLInputElement>('#write');
+let writeT = 0;
+write.addEventListener('input', () => { clearTimeout(writeT); writeT = window.setTimeout(() => reel?.write(write.value), 260); });
+write.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'Escape') write.blur(); });
+let resizeT = 0;
+addEventListener('resize', () => { clearTimeout(resizeT); resizeT = window.setTimeout(() => { if (introDone) reel?.relayout(); }, 250); });
 
-const observer = new IntersectionObserver((entries) => entries.forEach((entry) => { if (entry.isIntersecting) entry.target.classList.add('is-visible'); }), { threshold: 0.15 });
-document.querySelectorAll<HTMLElement>('.reveal-section').forEach((section) => observer.observe(section));
+// ---------- autopilot cues: what each chapter shows when nobody is driving ----------
+const cues: Cue[] = [
+  {
+    id: 'hero', label: 'Hello', section: sec('hero'),
+    perform: async (c) => {
+      await c.glide(0); if (!c.ok()) return;
+      c.lock(mvName, 'Marvel'); await c.wait(1500); if (!c.ok()) return;
+      if (reel && field) { // show that it's touchable: a ghost click scatters the dots
+        const x = innerWidth * (innerWidth >= 860 ? .64 : .5), y = innerHeight * .34;
+        c.lock({ x, y }, 'Click · scatter'); await c.wait(500); if (!c.ok()) return;
+        reel.burst(x, y); await c.wait(1300); if (!c.ok()) return;
+      }
+      c.lock($('.hero__name'), 'Lock · Ayush Srivastav'); await c.wait(1100); if (!c.ok()) return;
+      c.lock($('.hero__line'), 'Reading'); await c.read($('.hero__line'), 1100); if (!c.ok()) return;
+      c.lock($('.hero__now'), 'Now'); await c.wait(1000);
+    },
+  },
+  {
+    id: 'distance', label: 'Far', section: sec('distance'),
+    perform: async (c) => {
+      const s = sec('distance');
+      c.lock(null); await c.glide(topOf(s) - innerHeight * .08); if (!c.ok()) return;
+      c.lock($('.distance__num'), 'Tracking · Voyager 1'); await c.wait(1500); if (!c.ok()) return;
+      for (const w of $$('.words', s)) { // glide at reading pace so the words light up as they are read
+        c.lock(w, 'Reading'); await c.glide(topOf(w) + w.offsetHeight - innerHeight * .5, 650); if (!c.ok()) return;
+        await c.wait(500); if (!c.ok()) return;
+      }
+    },
+  },
+  {
+    id: 'pale', label: 'Home', section: sec('pale'),
+    perform: async (c) => { // slow pull-back, one sentence at a time; the reticle finds the dot at the end
+      const st = pale.st;
+      c.lock(null);
+      for (const [i, s] of pale.stops.entries()) {
+        await c.glide(st.start + (st.end - st.start) * Math.min(1, s + (i ? .05 : 0)), i ? 1100 : 2400); if (!c.ok()) return;
+        if (i >= 2) c.lock(pale.dot, i === pale.stops.length - 1 ? 'Earth · 0.12 pixel' : 'Earth · less than a pixel');
+        await c.read(paleLines[i], i === pale.stops.length - 1 ? 2400 : 1300, 2600); if (!c.ok()) return;
+      }
+      c.lock(null); await c.glide(st.end + 4);
+    },
+  },
+  {
+    id: 'orbit', label: 'Orbit', section: sec('orbit'),
+    perform: async (c) => {
+      c.lock(null); await c.glide(topOf($('.orbit__stage')) - innerHeight * .2); if (!c.ok()) return;
+      for (const id of ['say', 'glassbox', 'clible']) {
+        const el = orbit.el(id); if (!el) continue;
+        orbit.show(id); c.lock(el, `Lock · ${projects.find((p) => p.id === id)?.name}`);
+        await c.wait(1500); if (!c.ok()) { orbit.show(null); return; }
+      }
+      orbit.show(null);
+    },
+  },
+  {
+    id: 'files', label: 'Projects', section: sec('files'),
+    perform: async (c) => {
+      const cards = $$('.file');
+      c.lock(null);
+      for (const [i, card] of cards.entries()) {
+        const st = filesST;
+        const y = st ? st.start + (st.end - st.start) * (i / (cards.length - 1)) : topOf(card) - innerHeight * .15;
+        await c.glide(y, st ? 2600 : 2000); if (!c.ok()) return;
+        c.lock(card, `File ${String(i + 1).padStart(2, '0')}`); await c.read(card, 1000, 1700); if (!c.ok()) return;
+      }
+    },
+  },
+  {
+    id: 'how', label: 'How', section: sec('how'),
+    perform: async (c) => {
+      for (const li of $$('.how__item')) {
+        await c.glide(topOf(li) - innerHeight * .4, 1800); if (!c.ok()) return;
+        c.lock($('h3', li), `Principle ${li.dataset.n}`); await c.read(li, 900, 1600); if (!c.ok()) return;
+      }
+    },
+  },
+  {
+    id: 'contact', label: 'Signal', section: sec('contact'),
+    perform: async (c) => {
+      c.lock(null); await c.glide(document.documentElement.scrollHeight - innerHeight); if (!c.ok()) return;
+      c.lock(mail, 'Lock · say hello'); await c.wait(1600); if (!c.ok()) return;
+      c.lock(lightEl, 'Light time · Voyager 1'); await c.wait(1600); if (!c.ok()) return;
+      c.lock(null); await c.wait(2800); // a breath before going round again
+    },
+  },
+];
 
-const message = document.querySelector<HTMLElement>('.experiment-message');
-document.querySelectorAll<HTMLButtonElement>('.experiment-card').forEach((card) => card.addEventListener('click', () => { message!.textContent = card.dataset.message ?? ''; card.classList.add('selected'); setTimeout(() => card.classList.remove('selected'), 700); }));
+const pilotBtn = $('#pilot'), pilotState = $('#pilotState'), pilotChapter = $('#pilotChapter'), segs = $('#pilotSegs');
+segs.innerHTML = cues.map(() => '<i></i>').join('');
+const segEls = $$('i', segs);
+let lastPilot = '';
+function renderPilot(s: PilotState, cue: Cue | null, left: number) {
+  const idx = cue ? cues.indexOf(cue) : -1;
+  const label = s === 'paused' ? `Resumes in ${Math.ceil(left / 1000)}` : s === 'off' ? 'Autopilot off' : s === 'done' ? 'Your turn' : 'Autopilot';
+  const chap = s === 'flying' && cue ? `${String(idx + 1).padStart(2, '0')} · ${cue.label}` : s === 'paused' ? 'You are driving' : s === 'off' ? 'Tap to turn on' : s === 'done' ? 'Tour done · tap to replay' : 'Standing by';
+  pilotBtn.style.setProperty('--p', s === 'paused' ? String(1 - left / pilot.total) : '0');
+  const key = s + label + chap;
+  if (key === lastPilot) return;
+  lastPilot = key;
+  document.body.dataset.pilot = s;
+  pilotBtn.setAttribute('aria-pressed', String(s !== 'off' && s !== 'done'));
+  pilotState.textContent = label; pilotChapter.textContent = chap;
+  segEls.forEach((e, i) => e.classList.toggle('is-on', i <= idx && s === 'flying'));
+}
+const pilot = createAutopilot({
+  cues, reticle, scrollTo, topOf, onState: renderPilot,
+  outro: async (c) => { // hand over: show "hold", point at the box, then step back
+    if (!reel || !field) return;
+    const x = innerWidth * (innerWidth >= 860 ? .64 : .5), y = innerHeight * .34;
+    c.lock({ x, y }, 'Hold · gather'); field.setMouse((x / innerWidth) * 2 - 1, -((y / innerHeight) * 2 - 1));
+    await c.wait(500); if (!c.ok()) return;
+    reel.hold(true); await c.wait(1600); reel.hold(false); if (!c.ok()) return;
+    await c.wait(700); if (!c.ok()) return;
+    c.lock(write, 'Type · write'); await c.wait(1500); if (!c.ok()) return;
+    c.lock($('#mvHint'), 'Your turn'); await c.wait(1800);
+  },
+});
+pilotBtn.addEventListener('click', () => pilot.toggle());
 
-const instrument = document.querySelector<HTMLElement>('.instrument');
-const toggleInstrument = () => { if (!instrument) return; instrument.hidden = !instrument.hidden; };
-document.addEventListener('keydown', (event) => { if (event.key === 'Escape') instrument!.hidden = true; if (event.shiftKey && event.key.toLowerCase() === 'a') { event.preventDefault(); toggleInstrument(); } });
-setInterval(() => { if (!field || !instrument || instrument.hidden) return; const d = field.diagnostics(); document.querySelector('#diag-backend')!.textContent = d.backend; document.querySelector('#diag-particles')!.textContent = String(d.particles); document.querySelector('#diag-frame')!.textContent = `${d.frame.toFixed(1)} ms / ${d.calls} calls`; document.querySelector('#diag-quality')!.textContent = d.quality; }, 300);
+const takeOver = (e: Event) => {
+  if (!introDone || performance.now() - introEndedAt < 400) return; // the key that skipped the intro is not a takeover
+  if (e.type === 'keydown' && ['Shift', 'Alt', 'Meta', 'Control'].includes((e as KeyboardEvent).key)) return;
+  if ((e.target as Element | null)?.closest?.('#pilot')) return;
+  pilot.yieldTo();
+};
+(['wheel', 'touchstart', 'keydown', 'pointerdown'] as const).forEach((ev) => addEventListener(ev, takeOver, { passive: true }));
+
+// ---------- the score: Prelude in C major ----------
+// Plays on the first tap, click or key unless the visitor turned it off before (remembered). Browsers won't
+// start sound without a gesture, so we also try once at load — it works where the site has earned autoplay.
+const audio = $<HTMLAudioElement>('#prelude'), soundBtn = $('#sound'), introSound = $('#introSound');
+const score = createScore(audio);
+const renderSound = () => {
+  const on = score.playing;
+  soundBtn.textContent = on ? 'Sound on' : 'Sound off'; soundBtn.setAttribute('aria-pressed', String(on));
+  introSound.textContent = on ? '♪ Prelude in C' : '♪ Play with sound'; introSound.classList.toggle('is-on', on);
+  document.body.classList.toggle('has-sound', on);
+};
+const startSound = async () => { if (await score.start()) { store.set('as-sound', 'on'); renderSound(); } };
+const toggleSound = async () => {
+  if (score.playing) { score.stop(); store.set('as-sound', 'off'); renderSound(); } else await startSound();
+};
+soundBtn.addEventListener('click', toggleSound);
+introSound.addEventListener('click', (e) => { e.stopPropagation(); toggleSound(); });
+const firstGesture = () => {
+  ['pointerdown', 'keydown', 'touchend'].forEach((ev) => removeEventListener(ev, firstGesture, true));
+  if (store.get('as-sound') !== 'off' && !score.playing) startSound();
+};
+['pointerdown', 'keydown', 'touchend'].forEach((ev) => addEventListener(ev, firstGesture, { capture: true, passive: true }));
+if (store.get('as-sound') !== 'off') startSound(); // autoplay attempt; silently refused without a gesture
+// each chapter has its own loudness: the music swells for "Home" and steps back for reading
+const MOOD: Record<string, number> = { hero: .5, distance: .4, pale: .9, orbit: .45, files: .42, how: .38, contact: .55 };
+$$('[data-cue]').forEach((sct) => ScrollTrigger.create({ trigger: sct, start: 'top 55%', end: 'bottom 55%', onToggle: (st) => { if (st.isActive) score.setMood(MOOD[sct.dataset.cue ?? ''] ?? .45); } }));
+
+// ---------- instrument mode: Shift + A ----------
+const instrument = $('#instrument');
+let instrumentOn = false;
+function updateInstrument() {
+  $('#dFps').textContent = String(fps);
+  $('#dDots').textContent = field ? `${fmtKm(field.budget)} / ${fmtKm(field.n)}` : 'no WebGL';
+  $('#dPx').textContent = field ? field.renderer.getPixelRatio().toFixed(2) : '—';
+  $('#dBeat').textContent = introDone ? 'sky' : beatName;
+  $('#dPilot').textContent = pilot.state;
+}
+addEventListener('keydown', (e) => {
+  if ((e.target as Element | null)?.closest?.('input')) return;
+  if ((e.shiftKey && e.key.toLowerCase() === 'a') || (e.key === 'Escape' && instrumentOn)) {
+    instrumentOn = e.key === 'Escape' ? false : !instrumentOn;
+    instrument.hidden = !instrumentOn;
+    if (instrumentOn) updateInstrument();
+  }
+});
+
+Object.assign(window, { __site: { pilot, lenis, reel, field, get introDone() { return introDone; } } }); // test + console hook
+addEventListener('pagehide', () => field?.dispose());
+
+intro();

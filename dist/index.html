@@ -3,15 +3,146 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0a0a0a" />
-    <meta name="description" content="Ayush Srivastav — selected work and experiments." />
+    <meta name="theme-color" content="#050506" />
+    <meta name="description" content="Ayush Srivastav builds small software that does one thing well." />
     <link rel="icon" type="image/svg+xml" href="/airplane.svg" />
-    <title>Ayush Srivastav — Digital practice</title>
-    <script type="module" crossorigin src="/assets/index-CyXYqnqr.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-kNZmibTr.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preload" href="/fonts/clash-display-600.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/satoshi-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@1,6..72,300..500&display=swap" />
+    <title>Ayush Srivastav</title>
+    <script type="module" crossorigin src="/assets/index-BSHzRpL3.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DiY9uNN3.css">
   </head>
-  <body>
+  <body class="is-loading">
     <a class="skip-link" href="#main">Skip to content</a>
-    <div id="app"></div>
+    <canvas id="gl" aria-hidden="true"></canvas>
+    <div class="grain" aria-hidden="true"></div>
+
+    <!-- intro: the dots decide what to become -->
+    <div class="intro" aria-live="polite">
+      <p class="intro__caption mono" id="caption"></p>
+      <div class="intro__bar mono"><span id="beatNo">00 / 05</span><button id="introSound" class="intro__sound" type="button">♪ Play with sound</button><button id="skip" type="button">Skip intro <kbd>↵</kbd></button></div>
+    </div>
+
+    <!-- reticle: your cursor, and the autopilot's eye -->
+    <div class="reticle" id="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b><span class="reticle__label mono" id="reticleLabel"></span></div>
+
+    <header class="hud">
+      <a class="hud__mark" href="#top" aria-label="Ayush Srivastav, back to top">AS<span>.</span></a>
+      <span class="hud__clock mono" id="clock">T+00:00:00</span>
+      <nav class="hud__nav mono" aria-label="Primary">
+        <a href="#work">Work</a><a href="#how">How</a><a href="#contact">Contact</a>
+      </nav>
+    </header>
+    <div class="progress" aria-hidden="true"><i id="prog"></i></div>
+
+    <div class="dock">
+      <button class="pilot mono" id="pilot" type="button" aria-pressed="true" aria-label="Autopilot">
+        <span class="pilot__ring"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" /></svg><i></i></span>
+        <span class="pilot__text"><strong id="pilotState">Autopilot</strong><span id="pilotChapter">Standing by</span></span>
+        <span class="pilot__segs" id="pilotSegs"></span>
+      </button>
+      <span class="dock__voyager mono">Voyager 1 · <span id="hudKm">—</span> km</span>
+      <button class="sound mono" id="sound" type="button" aria-pressed="false">Sound off</button>
+    </div>
+
+    <main id="main">
+      <section class="hero" id="top" data-cue="hero" data-label="Hello">
+        <div class="marvel" id="marvel">
+          <p class="marvel__count mono"><span id="mvIdx">01</span> / 08 · Things people built</p>
+          <p class="marvel__name" id="mvName" aria-live="polite">&nbsp;</p>
+          <p class="marvel__line" id="mvLine">&nbsp;</p>
+          <div class="marvel__nav">
+            <button id="mvPrev" type="button" aria-label="Previous marvel">←</button>
+            <span class="marvel__dots" id="mvDots"></span>
+            <button id="mvNext" type="button" aria-label="Next marvel">→</button>
+          </div>
+          <span class="marvel__bar" aria-hidden="true"><i id="mvBar"></i></span>
+          <label class="marvel__write mono"><span>Write with the dots</span><input id="write" maxlength="16" placeholder="type a word" autocomplete="off" spellcheck="false" /></label>
+          <p class="marvel__hint mono" id="mvHint">Drag to turn · Click to scatter · Hold to gather</p>
+        </div>
+        <h1 class="hero__name" aria-label="Ayush Srivastav"><span class="split">Ayush</span><span class="split">Srivastav</span></h1>
+        <div class="hero__foot">
+          <p class="hero__line">I build small software that does one thing well, and fast.</p>
+          <p class="hero__now mono"><span class="dot"></span> Now: building <a href="#work">Say</a>, a browser extension you talk to.</p>
+        </div>
+      </section>
+
+      <section class="distance" id="distance" data-cue="distance" data-label="Distance">
+        <p class="kicker mono">01 — Far</p>
+        <div class="distance__num"><span id="km">25,900,000,000</span><small class="mono">km</small></div>
+        <p class="distance__cap mono">Voyager 1, right now. About one light-day from Earth.</p>
+        <p class="words" id="farWords">In 1977, people sent a machine the size of a small car into space. It has been flying for 49 years. It still sends home 160 bits every second.</p>
+        <p class="words words--soft" id="farWords2">Big things are mostly small things, done carefully, <em>for a long time.</em> That is the part I try to get right.</p>
+      </section>
+
+      <section class="pale" id="home" data-cue="pale" data-label="Home">
+        <div class="pale__pin">
+          <canvas id="pale" aria-hidden="true"></canvas>
+          <div class="pale__lines">
+            <p class="pale__line">This is home.</p>
+            <p class="pale__line">In 1990, Voyager 1 turned its camera around, six billion kilometres out, and took one last picture of us.</p>
+            <p class="pale__line">Everyone you have ever known lived on that dot.</p>
+            <p class="pale__line">Everything anyone has ever built was built there. Webb. Voyager. The chip in your hand.</p>
+            <p class="pale__line pale__line--last">It is worth making good things here.</p>
+          </div>
+          <span class="pale__here mono" id="paleHere" aria-hidden="true">You are here</span>
+          <p class="pale__credit mono">After Voyager 1's "Pale Blue Dot", 14 February 1990. A drawing, not the photo.</p>
+        </div>
+      </section>
+
+      <section class="orbit" id="work" data-cue="orbit" data-label="Orbit">
+        <div class="head">
+          <p class="kicker mono">02 — Work</p>
+          <h2 class="split">What I'm building</h2>
+          <p class="head__cap">Closer to the centre means closer to done.</p>
+        </div>
+        <div class="orbit__stage">
+          <svg class="orbit__svg" id="orbitSvg" viewBox="0 0 1000 560" role="img" aria-label="Projects shown as satellites. Inner orbit: building. Middle: built. Outer: parked or ideas."></svg>
+          <article class="orbit__card" id="orbitCard" aria-live="polite" hidden></article>
+        </div>
+        <ul class="orbit__legend mono" id="orbitLegend"></ul>
+      </section>
+
+      <section class="files" id="files" data-cue="files" data-label="Projects">
+        <div class="files__pin">
+          <p class="kicker mono files__kicker">03 — Projects, one by one</p>
+          <div class="files__track" id="filesTrack"></div>
+        </div>
+      </section>
+
+      <div class="marquee" aria-hidden="true"><div class="marquee__row" id="marquee"></div></div>
+
+      <section class="how" id="how" data-cue="how" data-label="How">
+        <div class="how__aside"><p class="kicker mono">04 — How I work</p><span class="how__index" id="howIndex">01</span></div>
+        <ol class="how__list" id="howList"></ol>
+      </section>
+
+      <section class="contact" id="contact" data-cue="contact" data-label="Signal">
+        <span class="contact__signal" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <p class="kicker mono">05 — Contact</p>
+        <h2 class="contact__title split">Say hello.</h2>
+        <a class="contact__mail" id="mail" href="#">email</a>
+        <div class="contact__meta mono">
+          <button type="button" id="copy">Copy address</button>
+          <a id="gh" href="#" rel="noopener">GitHub ↗</a>
+        </div>
+        <p class="contact__light">A message to me arrives in under a second. A message to Voyager 1 takes about <span class="mono" id="lightTime">24 h</span>.</p>
+        <p class="contact__stay" id="stay"></p>
+      </section>
+    </main>
+
+    <footer class="foot mono">
+      <span>Ayush Srivastav · 2026</span><span>Made by hand with three.js</span><span class="foot__egg">Shift + A</span>
+    </footer>
+
+    <aside class="instrument mono" id="instrument" aria-label="Diagnostics" hidden>
+      <p>Instrument</p>
+      <dl><dt>fps</dt><dd id="dFps">—</dd><dt>dots</dt><dd id="dDots">—</dd><dt>pixel ratio</dt><dd id="dPx">—</dd><dt>beat</dt><dd id="dBeat">—</dd><dt>autopilot</dt><dd id="dPilot">—</dd></dl>
+      <span>Shift + A or Esc to close</span>
+    </aside>
+    <audio id="prelude" src="/audio/prelude.mp3" preload="auto" loop></audio>
   </body>
 </html>

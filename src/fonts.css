@@ -1,0 +1,8 @@
+/* Clash Display + Satoshi by Indian Type Foundry, via Fontshare (ITF Free Font License) — self-hosted for speed.
+   Not certain the FFL covers self-hosting — verify at fontshare.com/licenses. */
+@font-face { font-family: 'Clash Display'; src: url('/fonts/clash-display-500.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Clash Display'; src: url('/fonts/clash-display-600.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Clash Display'; src: url('/fonts/clash-display-700.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Satoshi'; src: url('/fonts/satoshi-400.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Satoshi'; src: url('/fonts/satoshi-500.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Satoshi'; src: url('/fonts/satoshi-700.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
